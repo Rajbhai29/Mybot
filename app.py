@@ -1,55 +1,79 @@
-import os
 from flask import Flask, request
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackContext
-from dotenv import load_dotenv
 
-load_dotenv()
+import os
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-INSTAMOJO_API_KEY = os.getenv("INSTAMOJO_API_KEY")
-INSTAMOJO_AUTH_TOKEN = os.getenv("INSTAMOJO_AUTH_TOKEN")
-BASE_URL = os.getenv("BASE_URL")
+# ---- Config ----
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot ka token Render env me daalna hoga
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # @channelusername ya numeric ID
+INSTAMOJO_PAYMENT_LINK = os.getenv("INSTAMOJO_PAYMENT_LINK")  # Payment link
 
 app = Flask(__name__)
 
-# ======================= Telegram Bot ======================
+# ---- Telegram Bot ----
 def start(update: Update, context: CallbackContext):
-    keyboard = [[InlineKeyboardButton("₹2500 Pay Now", url="https://www.instamojo.com/@yourlink")]]
+    keyboard = [
+        [InlineKeyboardButton("💳 ₹2500 Pay Now", url=INSTAMOJO_PAYMENT_LINK)]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text(
-        "🙏 Welcome! \n\n🌟 Exclusive Business Service for You 🌟\n\n"
-        "⚡ Sirf ₹2500 me aapko 30 din ke liye premium access milega.\n"
-        "👇 Niche button dabakar turant payment kijiye 👇",
+        "🙏 Welcome!\n\n"
+        "⚡ Exclusive Access to our Premium Channel.\n"
+        "💼 Business Insights + Earning Secrets.\n\n"
+        "👉 Join only ₹2500 / 30 days.\n\n"
+        "Click below to Pay securely 👇",
         reply_markup=reply_markup
     )
 
-# ======================= Flask Webhook ======================
-@app.route('/instamojo-webhook', methods=['POST'])
-def instamojo_webhook():
-    data = request.form.to_dict()
-    if data.get("status") == "Credit":
-        user_id = data.get("buyer_phone")  # Yaha aap apna unique identifier rakhna hoga
-        # Telegram par invite link bhejo
-        invite_link = f"https://t.me/{CHANNEL_ID}?start={user_id}"
-        send_message(user_id, f"✅ Payment Successful!\n\nJoin here: {invite_link}\n(Link valid 10 min only)")
-    return "OK", 200
+def send_invite_link(user_id):
+    # Invite link generate (temporary link banega)
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/createChatInviteLink"
+    payload = {
+        "chat_id": CHANNEL_ID,
+        "expire_date": None,
+        "member_limit": 1
+    }
+    r = requests.post(url, json=payload)
+    data = r.json()
+    if "result" in data:
+        invite_link = data["result"]["invite_link"]
+        # User ko bhejo
+        send_text(user_id, f"🎉 Payment Successful!\n\nYeh rahi aapki Private Channel link (10 min valid):\n{invite_link}")
+    else:
+        send_text(user_id, "❌ Invite link generate nahi ho paaya. Admin ko contact karo.")
 
-def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
+def send_text(user_id, text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": user_id, "text": text}
     requests.post(url, json=payload)
 
-# ======================= Main ======================
-def main():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
+# ---- Flask Webhook (Instamojo) ----
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    data = request.form.to_dict()
+    print("Webhook data:", data)
+
+    # Agar payment success mila
+    if data.get("status") == "Credit":
+        buyer_id = data.get("buyer_phone") or data.get("buyer_email")  # tum yahan mapping kar sakte ho
+        telegram_id = data.get("purpose")  # customer ka Telegram ID "purpose" me bhejna hoga
+        if telegram_id:
+            send_invite_link(telegram_id)
+
+    return "OK", 200
+
+# ---- Start Bot Locally ----
+def run_bot():
+    updater = Updater(BOT_TOKEN)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler("start", start))
     updater.start_polling()
     updater.idle()
 
 if __name__ == "__main__":
-    main()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # Flask + Bot dono ek sath run
+    from threading import Thread
+    Thread(target=run_bot).start()
+    app.run(host="0.0.0.0", port=5000)
