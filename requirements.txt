@@ -4,3 +4,4 @@ requests==2.32.3
 python-dotenv==1.0.1
 gunicorn==21.2.0
 APScheduler==3.6.3
+imghdr-py==0.4.1
